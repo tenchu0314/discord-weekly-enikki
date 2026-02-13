@@ -35,7 +35,30 @@ ${formattedMessages}
         contents: prompt,
     });
 
-    const summary = response.text;
+    /* レスポンスからテキストを抽出 */
+    let summary;
+
+    // SDKのバージョンやレスポンス形式によって取得方法が異なるため分岐
+    if (typeof response.text === 'function') {
+        summary = response.text();
+    } else if (response.text) {
+        summary = response.text;
+    } else if (response.candidates && response.candidates.length > 0) {
+        // candidatesから直接テキストを結合して取得
+        const candidate = response.candidates[0];
+        if (candidate.content && candidate.content.parts) {
+            summary = candidate.content.parts
+                .filter(part => part.text)
+                .map(part => part.text)
+                .join('');
+        }
+    }
+
+    if (!summary) {
+        console.error("Gemini API Response:", JSON.stringify(response, null, 2));
+        throw new Error("Gemini APIからのレスポンスに有効なテキストが含まれていません。");
+    }
+
     console.log(`✅ まとめ生成完了 (${summary.length} 文字)`);
     return summary;
 }

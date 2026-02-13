@@ -19,7 +19,6 @@ export async function generateImage(summary) {
 - かわいいポップなイラスト風
 - 明るく楽しい雰囲気
 - サーバーの1週間の活動を象徴するシーンを描く
-- 日本語のテキストは画像内に入れない（文字化けを防ぐため）
 
 ## 週間まとめの内容
 ${summary.slice(0, 1000)}
@@ -32,13 +31,28 @@ ${summary.slice(0, 1000)}
     });
 
     // レスポンスから画像データを探す
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            const imageBuffer = Buffer.from(part.inlineData.data, "base64");
-            console.log(`✅ 画像生成完了 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
-            return imageBuffer;
+    if (response.candidates && response.candidates.length > 0) {
+        const candidate = response.candidates[0];
+
+        // 生成が何らかの理由で停止したか確認
+        if (candidate.finishReason && candidate.finishReason !== "STOP") {
+            console.warn(`⚠️ 画像生成の Finish Reason: ${candidate.finishReason}`);
+        }
+
+        if (candidate.content && candidate.content.parts) {
+            for (const part of candidate.content.parts) {
+                if (part.inlineData) {
+                    const imageBuffer = Buffer.from(part.inlineData.data, "base64");
+                    console.log(`✅ 画像生成完了 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+                    return imageBuffer;
+                }
+            }
         }
     }
+
+    // デバッグ用にレスポンス全体を出力
+    console.error("❌ 画像生成エラー: レスポンス詳細");
+    console.error(JSON.stringify(response, null, 2));
 
     throw new Error("画像の生成に失敗しました。レスポンスに画像データが含まれていません。");
 }
