@@ -22,6 +22,8 @@ discord-weekly-enikki/
 │   ├── discord.js        # Discord会話取得・投稿
 │   ├── summarizer.js     # Gemini APIでまとめ生成
 │   └── imageGenerator.js # Nano Banana Proで画像生成
+├── references/
+│   └── style.png         # スタイル参照画像（任意）
 ├── .env.example          # 環境変数テンプレート
 ├── .gitignore
 ├── package.json
@@ -71,6 +73,20 @@ npm install
 ```bash
 npm start
 ```
+
+## 🎨 スタイル参照画像（任意）
+
+毎週生成される画像の画風を統一したい場合、参照画像を配置できます。
+
+```bash
+# お好みの画風の画像を references/style.png として配置
+cp your-favorite-style.png references/style.png
+```
+
+- `references/style.png` が存在する場合、画像生成時にスタイル参照として自動的に渡されます
+- 存在しない場合は従来通りテキストのみで画像を生成します
+- 前回の生成画像が気に入ったら、それを `style.png` に上書きすればテイストを引き継げます
+- PNG / JPEG / WebP 形式に対応しています
 
 ## ⏰ cron設定（本番運用）
 
