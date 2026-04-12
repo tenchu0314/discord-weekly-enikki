@@ -171,7 +171,7 @@ ${summary}
                 throw new Error("画像生成用プロンプトの作成に失敗しました。");
             }
 
-            console.log(`  📝 生成されたプロンプト: ${imagePrompt.substring(0, 80)}...`);
+            console.log(`  📝 生成されたプロンプト: ${imagePrompt}`);
 
             // 2. 画像を生成する
             // キャラクター参照画像のラベリング指示を構築
