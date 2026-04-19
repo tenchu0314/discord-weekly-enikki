@@ -174,24 +174,18 @@ ${summary}
             console.log(`  📝 生成されたプロンプト: ${imagePrompt}`);
 
             // 2. 画像を生成する
-            // キャラクター参照画像のラベリング指示を構築
-            let charLabelInstruction = "";
-            if (characterRefs.length > 0) {
-                const labels = characterRefs
-                    .map((c, i) => `Reference image ${i + (styleRef ? 2 : 1)} is the character "${c.name}".`)
-                    .join(" ");
-                charLabelInstruction = `\nCharacter references: ${labels} Depict these characters based on their reference images.`;
-            }
-
             const finalImagePrompt = `[Generate an image directly based on this prompt. Do not output any text plan.]
-${styleRef ? "Match the artistic style of the first reference image." : ""}${charLabelInstruction}
+${styleRef ? "Match the artistic style of the Style Reference image." : ""}
+${characterRefs.length > 0 ? "Depict the characters based on their respective Character References. Ensure you use the exact reference image assigned to each character's name." : ""}
+
 ${imagePrompt}`;
 
-            // contents を構築（テキスト + スタイル参照 + キャラクター参照）
-            const contents = [{ text: finalImagePrompt }];
+            // contents を構築（各画像に名札としてのテキストを付与する）
+            const contents = [];
 
             // スタイル参照画像を先に追加
             if (styleRef) {
+                contents.push({ text: "Style Reference:" });
                 contents.push({
                     inlineData: {
                         mimeType: styleRef.mimeType,
@@ -201,14 +195,21 @@ ${imagePrompt}`;
             }
 
             // キャラクター参照画像を追加
-            for (const charRef of characterRefs) {
-                contents.push({
-                    inlineData: {
-                        mimeType: charRef.mimeType,
-                        data: charRef.data,
-                    },
-                });
+            if (characterRefs.length > 0) {
+                contents.push({ text: "Character References:" });
+                for (const charRef of characterRefs) {
+                    contents.push({ text: `Character Name: "${charRef.name}"` });
+                    contents.push({
+                        inlineData: {
+                            mimeType: charRef.mimeType,
+                            data: charRef.data,
+                        },
+                    });
+                }
             }
+
+            // 最後にメインのプロンプトを追加
+            contents.push({ text: finalImagePrompt });
 
             const response = await ai.models.generateContent({
                 model: config.gemini.imageModel,
