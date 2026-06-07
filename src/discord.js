@@ -113,7 +113,62 @@ async function fetchMessagesInPeriod(channel, start, end, botUserId) {
 }
 
 /**
- * Botが所属する全サーバーの全テキストチャンネルから対象期間のメッセージを収集する
+ * フォーラムチャンネルの全スレッド（アクティブ＋アーカイブ済み）から
+ * 対象期間内のメッセージを収集する
+ * @param {import("discord.js").ForumChannel} forumChannel
+ * @param {Date} start
+ * @param {Date} end
+ * @param {string} botUserId - 除外するBotのユーザーID
+ * @returns {Promise<Array<{channelName: string, messages: Array}>>}
+ */
+async function fetchForumMessages(forumChannel, start, end, botUserId) {
+    const results = [];
+
+    // アクティブなスレッドとアーカイブ済みスレッドを両方取得
+    let allThreads = [];
+    try {
+        const activeThreads = await forumChannel.threads.fetchActive();
+        allThreads.push(...activeThreads.threads.values());
+    } catch (error) {
+        console.warn(`  ⚠️ [${forumChannel.name}] アクティブスレッドの取得に失敗: ${error.message}`);
+    }
+    try {
+        const archivedThreads = await forumChannel.threads.fetchArchived();
+        allThreads.push(...archivedThreads.threads.values());
+    } catch (error) {
+        console.warn(`  ⚠️ [${forumChannel.name}] アーカイブスレッドの取得に失敗: ${error.message}`);
+    }
+
+    for (const thread of allThreads) {
+        // スレッドの作成日時が対象期間より明らかに古い場合はスキップ（高速化）
+        if (thread.createdAt && thread.createdAt < start) {
+            // アーカイブ済みスレッドで最終投稿が期間内の可能性があるためスキップしない
+        }
+
+        console.log(`  💬 [${forumChannel.name}] スレッド: ${thread.name} のメッセージを取得中...`);
+        const messages = await fetchMessagesInPeriod(thread, start, end, botUserId);
+
+        if (messages.length > 0) {
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+            results.push({
+                channelName: `${forumChannel.name} > ${thread.name}`,
+                messages,
+            });
+            console.log(`    → ${messages.length} 件のメッセージを取得`);
+        } else {
+            console.log(`    → メッセージなし`);
+        }
+
+        // レート制限対策
+        await sleep(300);
+    }
+
+    return results;
+}
+
+/**
+ * Botが所属する全サーバーの全テキストチャンネル・フォーラムチャンネルから
+ * 対象期間のメッセージを収集する
  * @param {Client} client
  * @param {Date} start
  * @param {Date} end
@@ -128,7 +183,7 @@ export async function collectAllMessages(client, start, end) {
         console.log(`\n🏠 サーバー: ${guild.name}`);
         const channelMessages = [];
 
-        // テキストチャンネルのみを対象にする
+        // テキストチャンネルを対象にする
         const textChannels = guild.channels.cache.filter(
             (ch) => ch.type === ChannelType.GuildText
         );
@@ -148,6 +203,17 @@ export async function collectAllMessages(client, start, end) {
             } else {
                 console.log(`    → メッセージなし`);
             }
+        }
+
+        // フォーラムチャンネルを対象にする
+        const forumChannels = guild.channels.cache.filter(
+            (ch) => ch.type === ChannelType.GuildForum
+        );
+
+        for (const forumChannel of forumChannels.values()) {
+            console.log(`  📋 [フォーラム] ${forumChannel.name} のスレッドを取得中...`);
+            const forumResults = await fetchForumMessages(forumChannel, start, end, botUserId);
+            channelMessages.push(...forumResults);
         }
 
         if (channelMessages.length > 0) {
