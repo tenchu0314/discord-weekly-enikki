@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
+import { withGeminiRetry } from "./retry.js";
 
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -30,34 +31,38 @@ ${formattedMessages}
 ## 出力
 上記の会話に基づいた週間まとめを日本語で書いてください。`;
 
-    const response = await ai.models.generateContent({
-        model: config.gemini.textModel,
-        contents: prompt,
-    });
+    const summary = await withGeminiRetry(async () => {
+        const response = await ai.models.generateContent({
+            model: config.gemini.textModel,
+            contents: prompt,
+        });
 
-    /* レスポンスからテキストを抽出 */
-    let summary;
+        /* レスポンスからテキストを抽出 */
+        let extractedText;
 
-    // SDKのバージョンやレスポンス形式によって取得方法が異なるため分岐
-    if (typeof response.text === 'function') {
-        summary = response.text();
-    } else if (response.text) {
-        summary = response.text;
-    } else if (response.candidates && response.candidates.length > 0) {
-        // candidatesから直接テキストを結合して取得
-        const candidate = response.candidates[0];
-        if (candidate.content && candidate.content.parts) {
-            summary = candidate.content.parts
-                .filter(part => part.text)
-                .map(part => part.text)
-                .join('');
+        // SDKのバージョンやレスポンス形式によって取得方法が異なるため分岐
+        if (typeof response.text === 'function') {
+            extractedText = response.text();
+        } else if (response.text) {
+            extractedText = response.text;
+        } else if (response.candidates && response.candidates.length > 0) {
+            // candidatesから直接テキストを結合して取得
+            const candidate = response.candidates[0];
+            if (candidate.content?.parts) {
+                extractedText = candidate.content.parts
+                    .filter(part => part.text)
+                    .map(part => part.text)
+                    .join('');
+            }
         }
-    }
 
-    if (!summary) {
-        console.error("Gemini API Response:", JSON.stringify(response, null, 2));
-        throw new Error("Gemini APIからのレスポンスに有効なテキストが含まれていません。");
-    }
+        if (!extractedText) {
+            console.error("Gemini API Response:", JSON.stringify(response, null, 2));
+            throw new Error("Gemini APIからのレスポンスに有効なテキストが含まれていません。");
+        }
+
+        return extractedText;
+    }, "週間まとめ生成");
 
     console.log(`✅ まとめ生成完了 (${summary.length} 文字)`);
     return summary;
