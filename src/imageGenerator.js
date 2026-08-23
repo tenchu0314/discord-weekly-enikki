@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
+import { withGeminiRetry } from "./retry.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,7 +84,7 @@ function loadCharacterReferences(summary) {
                 data: base64Data,
             });
 
-            console.log(`  � キャラクター参照: ${characterName} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+            console.log(`  👤 キャラクター参照: ${characterName} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
         }
     }
 
@@ -104,12 +105,9 @@ function loadCharacterReferences(summary) {
  * @returns {Promise<Buffer>} 生成された画像の Buffer
  */
 export async function generateImage(summary) {
-    const MAX_RETRIES = 3;
-    let attempt = 0;
-
     console.log("\n🎨 Nano Banana Pro で画像を生成中...");
 
-    // リファレンス画像の読み込み（ループの外で1回だけ）
+    // リファレンス画像の読み込み
     const styleRef = loadStyleReference();
     if (!styleRef) {
         console.log("  ℹ️ スタイル参照画像なし。references/style.png を配置すると画風を統一できます。");
@@ -120,27 +118,19 @@ export async function generateImage(summary) {
         console.log("  ℹ️ キャラクター参照画像なし。references/characters/ に画像を配置するとキャラクターを統一できます。");
     }
 
-    while (attempt < MAX_RETRIES) {
-        attempt++;
-        if (attempt > 1) {
-            console.log(`\n🔄 画像生成リトライ中... (試行 ${attempt}/${MAX_RETRIES})`);
-        }
+    // 1. まとめテキストから画像生成用のプロンプトを作成する（テキストモデルを使用）
+    console.log("  💭 画像生成用プロンプトを考案中...");
 
-        try {
-            // 1. まとめテキストから画像生成用のプロンプトを作成する（テキストモデルを使用）
-            console.log("  💭 画像生成用プロンプトを考案中...");
+    let refInstructions = "";
+    if (styleRef) {
+        refInstructions += "\n- 添付されるスタイル参照画像の画風・色彩・タッチに合わせてください。プロンプトにスタイルの特徴も含めてください。";
+    }
+    if (characterRefs.length > 0) {
+        const charList = characterRefs.map(c => c.name).join("、");
+        refInstructions += `\n- 以下のキャラクターの参照画像が添付されます: ${charList}。これらのキャラクターが登場する場合、参照画像に基づいた外見で描写してください。`;
+    }
 
-            // リファレンス画像に関する追加指示
-            let refInstructions = "";
-            if (styleRef) {
-                refInstructions += "\n- 添付されるスタイル参照画像の画風・色彩・タッチに合わせてください。プロンプトにスタイルの特徴も含めてください。";
-            }
-            if (characterRefs.length > 0) {
-                const charList = characterRefs.map(c => c.name).join("、");
-                refInstructions += `\n- 以下のキャラクターの参照画像が添付されます: ${charList}。これらのキャラクターが登場する場合、参照画像に基づいた外見で描写してください。`;
-            }
-
-            const promptForImagePrompt = `あなたはAI画像生成のプロンプトエンジニアです。
+    const promptForImagePrompt = `あなたはAI画像生成のプロンプトエンジニアです。
 以下のDiscordサーバーの週間まとめを読み、その週を象徴する1枚のイラストを生成するためのプロンプトを作成してください。
 
 ## 週間まとめ
@@ -154,109 +144,96 @@ ${summary}
 - まとめの中で最も印象的な出来事やシーンを具体的に描写してください。
 - キャラクターや背景、照明などの詳細を含めてください。${refInstructions}`;
 
-            const promptResponse = await ai.models.generateContent({
-                model: config.gemini.textModel,
-                contents: promptForImagePrompt,
-            });
+    const imagePrompt = await withGeminiRetry(async () => {
+        const promptResponse = await ai.models.generateContent({
+            model: config.gemini.textModel,
+            contents: promptForImagePrompt,
+        });
 
-            // SDKのバージョン差異吸収
-            let imagePrompt;
-            if (typeof promptResponse.text === 'function') {
-                imagePrompt = promptResponse.text();
-            } else {
-                imagePrompt = promptResponse.text || promptResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
-            }
+        let generatedPrompt;
+        if (typeof promptResponse.text === 'function') {
+            generatedPrompt = promptResponse.text();
+        } else {
+            generatedPrompt = promptResponse.text || promptResponse.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        }
 
-            if (!imagePrompt) {
-                throw new Error("画像生成用プロンプトの作成に失敗しました。");
-            }
+        if (!generatedPrompt) {
+            throw new Error("画像生成用プロンプトの作成に失敗しました。レスポンスが空です。");
+        }
 
-            console.log(`  📝 生成されたプロンプト: ${imagePrompt}`);
+        return generatedPrompt;
+    }, "画像生成用プロンプト考案");
 
-            // 2. 画像を生成する
-            const finalImagePrompt = `[Generate an image directly based on this prompt. Do not output any text plan.]
+    console.log(`  📝 生成されたプロンプト: ${imagePrompt}`);
+
+    // 2. 画像を生成する
+    const finalImagePrompt = `[Generate an image directly based on this prompt. Do not output any text plan.]
 ${styleRef ? "Match the artistic style of the Style Reference image." : ""}
 ${characterRefs.length > 0 ? "Depict the characters based on their respective Character References. Ensure you use the exact reference image assigned to each character's name." : ""}
 
 ${imagePrompt}`;
 
-            // contents を構築（各画像に名札としてのテキストを付与する）
-            const contents = [];
+    const contents = [];
 
-            // スタイル参照画像を先に追加
-            if (styleRef) {
-                contents.push({ text: "Style Reference:" });
-                contents.push({
-                    inlineData: {
-                        mimeType: styleRef.mimeType,
-                        data: styleRef.data,
-                    },
-                });
-            }
+    // スタイル参照画像を先に追加
+    if (styleRef) {
+        contents.push({ text: "Style Reference:" });
+        contents.push({
+            inlineData: {
+                mimeType: styleRef.mimeType,
+                data: styleRef.data,
+            },
+        });
+    }
 
-            // キャラクター参照画像を追加
-            if (characterRefs.length > 0) {
-                contents.push({ text: "Character References:" });
-                for (const charRef of characterRefs) {
-                    contents.push({ text: `Character Name: "${charRef.name}"` });
-                    contents.push({
-                        inlineData: {
-                            mimeType: charRef.mimeType,
-                            data: charRef.data,
-                        },
-                    });
-                }
-            }
-
-            // 最後にメインのプロンプトを追加
-            contents.push({ text: finalImagePrompt });
-
-            const response = await ai.models.generateContent({
-                model: config.gemini.imageModel,
-                contents: contents,
-                config: {
-                    responseModalities: ["TEXT", "IMAGE"],
-                    temperature: 0.4,
+    // キャラクター参照画像を追加
+    if (characterRefs.length > 0) {
+        contents.push({ text: "Character References:" });
+        for (const charRef of characterRefs) {
+            contents.push({ text: `Character Name: "${charRef.name}"` });
+            contents.push({
+                inlineData: {
+                    mimeType: charRef.mimeType,
+                    data: charRef.data,
                 },
             });
-
-            // レスポンスから画像データを探す
-            if (response.candidates && response.candidates.length > 0) {
-                const candidate = response.candidates[0];
-
-                if (candidate.finishReason && candidate.finishReason !== "STOP") {
-                    console.warn(`⚠️ 画像生成の Finish Reason: ${candidate.finishReason}`);
-                }
-
-                if (candidate.content && candidate.content.parts) {
-                    for (const part of candidate.content.parts) {
-                        if (part.inlineData) {
-                            const imageBuffer = Buffer.from(part.inlineData.data, "base64");
-                            console.log(`✅ 画像生成完了 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
-                            return imageBuffer;
-                        }
-                    }
-                }
-            }
-
-            // 失敗時のログ出力
-            console.warn(`❌ 画像生成失敗 (試行 ${attempt}/${MAX_RETRIES}): レスポンスに画像が含まれていませんでした。`);
-
-            if (attempt === MAX_RETRIES) {
-                console.error("❌ 最終エラー: レスポンス詳細");
-                console.error(JSON.stringify(response, null, 2));
-            }
-
-        } catch (error) {
-            console.warn(`❌ 予期せぬエラー (試行 ${attempt}/${MAX_RETRIES}):`, error.message);
-            if (attempt === MAX_RETRIES) throw error;
-        }
-
-        // 次の試行まで少し待つ
-        if (attempt < MAX_RETRIES) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
         }
     }
 
-    throw new Error("画像の生成に失敗しました。最大リトライ回数を超えました。");
+    // 最後にメインのプロンプトを追加
+    contents.push({ text: finalImagePrompt });
+
+    const imageBuffer = await withGeminiRetry(async () => {
+        const response = await ai.models.generateContent({
+            model: config.gemini.imageModel,
+            contents: contents,
+            config: {
+                responseModalities: ["TEXT", "IMAGE"],
+                temperature: 0.4,
+            },
+        });
+
+        // レスポンスから画像データを探す
+        if (response.candidates && response.candidates.length > 0) {
+            const candidate = response.candidates[0];
+
+            if (candidate.finishReason && candidate.finishReason !== "STOP") {
+                console.warn(`⚠️ 画像生成の Finish Reason: ${candidate.finishReason}`);
+            }
+
+            if (candidate.content?.parts) {
+                for (const part of candidate.content.parts) {
+                    if (part.inlineData) {
+                        return Buffer.from(part.inlineData.data, "base64");
+                    }
+                }
+            }
+        }
+
+        console.error("❌ 画像生成エラー: レスポンス詳細", JSON.stringify(response, null, 2));
+        throw new Error("Gemini APIからのレスポンスに画像データが含まれていませんでした。");
+    }, "画像生成 (Nano Banana Pro)");
+
+    console.log(`✅ 画像生成完了 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+    return imageBuffer;
 }
