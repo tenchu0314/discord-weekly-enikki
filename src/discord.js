@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, ChannelType } from "discord.js";
+import { Client, GatewayIntentBits, ChannelType, Events } from "discord.js";
 import { config } from "./config.js";
 
 /**
@@ -21,7 +21,7 @@ export async function createDiscordClient() {
         if (client.isReady()) {
             resolve();
         } else {
-            client.once("ready", resolve);
+            client.once(Events.ClientReady, resolve);
         }
     });
 
