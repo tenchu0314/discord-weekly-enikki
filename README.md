@@ -9,7 +9,8 @@ Discordサーバーの過去1週間の会話を自動でまとめ、**Gemini API
 - Botの投稿は **自動除外**（循環参照防止）
 - **Gemini API** で週間まとめテキストを生成
 - まとめテキストから **画像生成用プロンプトを自動考案**（2段階生成）
-- **Nano Banana Pro (Gemini 3 Pro Image)** でイラストを生成（最大3回リトライ）
+- **Nano Banana Pro (Gemini 3 Pro Image)** でイラストを生成
+- Gemini API呼び出しエラー時は **指数バックオフで自動リトライ（最大3時間）**
 - **スタイル参照画像** による画風の統一
 - **キャラクター参照画像** によるユーザーの見た目の統一
 - 指定チャンネルに **テキスト + 画像** をセットで投稿
@@ -24,12 +25,17 @@ discord-weekly-enikki/
 │   ├── config.js         # 設定管理
 │   ├── discord.js        # Discord会話取得・投稿
 │   ├── summarizer.js     # Gemini APIでまとめ生成
-│   └── imageGenerator.js # Nano Banana Proで画像生成
+│   ├── imageGenerator.js # Nano Banana Proで画像生成
+│   └── retry.js          # Gemini API リトライ処理（指数バックオフ）
 ├── references/
 │   ├── style.png         # スタイル参照画像（任意）
 │   └── characters/       # キャラクター参照画像（任意）
-│       ├── リンカ.png
-│       └── ふぐ.png
+│       ├── MEG.png
+│       ├── yusuga.png
+│       ├── おっちょこちょい.png
+│       ├── にょーそくん.png
+│       ├── ふぐ.png
+│       └── リンカ.png
 ├── .env.example          # 環境変数テンプレート
 ├── .gitignore
 ├── package.json
@@ -45,10 +51,10 @@ discord-weekly-enikki/
    - フォーラムはアクティブ・アーカイブ済みスレッドを両方対象
    - レート制限対策のウェイト付き
 3. 会話ログをGemini API（テキストモデル）に送信し、週間まとめを生成
-4. まとめテキストをGemini API（テキストモデル）に送信し、画像生成用の英語プロンプトを考案
+4. まとめテキストをGemini API（テキストモデル）に送信し、画像生成用の日本語プロンプトを考案
 5. 考案されたプロンプト + 参照画像をNano Banana Pro（画像モデル）に送信し、イラストを生成
-   - 画像生成に失敗した場合、ステップ4からリトライ（最大3回）
-6. まとめテキスト + イラストを指定チャンネルに投稿
+   - ステップ3〜5のGemini API呼び出しに失敗した場合、それぞれ指数バックオフでリトライ（最大3時間）
+6. まとめテキスト + イラストを指定チャンネルに投稿（2000文字を超える場合は自動分割）
 7. Discordから切断して終了
 ```
 
@@ -56,7 +62,7 @@ discord-weekly-enikki/
 
 ### 前提条件
 
-- **Node.js** v18 以上
+- **Node.js** v22 以上
 
 ### 1. Discord Botの作成
 
@@ -86,6 +92,10 @@ cp .env.example .env
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
 DISCORD_TARGET_CHANNEL_ID=your_channel_id_here
 GEMINI_API_KEY=your_gemini_api_key_here
+
+# 任意: 使用モデルの指定（.env.example で設定済み）
+GEMINI_TEXT_MODEL=gemini-2.5-flash
+GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview
 ```
 
 ### 4. 依存パッケージのインストール
@@ -113,7 +123,7 @@ npm start
 cp your-favorite-style.png references/style.png
 ```
 
-- `references/style.png` が存在する場合、画像生成時にスタイル参照として自動的に渡されます
+- `references/style.png`（または `.jpg` / `.jpeg` / `.webp`）が存在する場合、画像生成時にスタイル参照として自動的に渡されます
 - 存在しない場合は従来通りテキストのみで画像を生成します
 - 前回の生成画像が気に入ったら、それを `style.png` に上書きすればテイストを引き継げます
 - PNG / JPEG / WebP 形式に対応しています
@@ -128,7 +138,7 @@ Discordユーザーの見た目をイラスト上で統一したい場合に使�
 references/characters/
 ├── リンカ.png
 ├── ふぐ.png
-└── にょーそ.png
+└── にょーそくん.png
 ```
 
 - まとめテキスト内にファイル名と一致するユーザー名が **登場した場合のみ** 参照画像が渡されます
@@ -159,10 +169,10 @@ crontab -e
 | `DISCORD_BOT_TOKEN` | ✅ | - | Discord Bot トークン |
 | `DISCORD_TARGET_CHANNEL_ID` | ✅ | - | まとめ投稿先チャンネルID |
 | `GEMINI_API_KEY` | ✅ | - | Google Gemini API キー |
-| `GEMINI_TEXT_MODEL` | ❌ | `gemini-2.5-flash` | テキスト要約モデル |
+| `GEMINI_TEXT_MODEL` | ❌ | `gemini-2.5-flash` | テキスト要約・画像プロンプト生成モデル |
 | `GEMINI_IMAGE_MODEL` | ❌ | `gemini-2.5-flash` | 画像生成モデル |
 
-> **ヒント**: Nano Banana Pro を使用する場合は `.env` に `GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` を設定してください。
+> **ヒント**: Nano Banana Pro を使用する場合は `.env` に `GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` を設定してください（`.env.example` では設定済みです）。
 
 ## ⚠️ 注意事項
 
@@ -170,5 +180,5 @@ crontab -e
 - Gemini APIのトークン制限により、非常に大量のメッセージがある場合は一部が切り捨てられる可能性があります
 - Nano Banana Pro のAPIはプレビュー版のため、モデル名が変更される可能性があります
 - Bot の **Message Content Intent** が有効でないとメッセージ内容を取得できません
-- 画像生成に失敗した場合、プロンプト生成からやり直すリトライが最大3回行われます
+- Gemini APIの呼び出し（まとめ生成・プロンプト考案・画像生成）に失敗した場合、指数バックオフによるリトライが最大3時間行われます（認証エラー等の復旧不可能なエラーを除く）
 - キャラクター参照画像のファイル名はDiscordの **表示名と完全一致** する必要があります

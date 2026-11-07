@@ -5,12 +5,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey, apiVersion: "v1beta" });
 
 // プロジェクトルートからリファレンス画像のパスを解決
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STYLE_REF_PATH = path.join(__dirname, "..", "references", "style.png");
-const CHARACTERS_DIR = path.join(__dirname, "..", "references", "characters");
+const REFERENCES_DIR = path.join(__dirname, "..", "references");
+const CHARACTERS_DIR = path.join(REFERENCES_DIR, "characters");
 
 // 対応する画像拡張子
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
@@ -35,20 +35,22 @@ function getMimeType(ext) {
 
 /**
  * スタイル参照画像を読み込む
- * ファイルが存在しない場合は null を返す
+ * references/style.{png,jpg,jpeg,webp} を探索し、存在しない場合は null を返す
  * @returns {{ mimeType: string, data: string } | null}
  */
-function loadStyleReference() {
-    if (!fs.existsSync(STYLE_REF_PATH)) {
-        return null;
+export function loadStyleReference() {
+    for (const ext of IMAGE_EXTENSIONS) {
+        const candidatePath = path.join(REFERENCES_DIR, `style${ext}`);
+        if (fs.existsSync(candidatePath)) {
+            const imageBuffer = fs.readFileSync(candidatePath);
+            const base64Data = imageBuffer.toString("base64");
+
+            console.log(`  🖼️ スタイル参照画像を読み込みました: ${path.basename(candidatePath)} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+            return { mimeType: getMimeType(ext), data: base64Data };
+        }
     }
 
-    const imageBuffer = fs.readFileSync(STYLE_REF_PATH);
-    const base64Data = imageBuffer.toString("base64");
-    const ext = path.extname(STYLE_REF_PATH).toLowerCase();
-
-    console.log(`  🖼️ スタイル参照画像を読み込みました: ${path.basename(STYLE_REF_PATH)} (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
-    return { mimeType: getMimeType(ext), data: base64Data };
+    return null;
 }
 
 /**
@@ -99,7 +101,7 @@ function loadCharacterReferences(summary) {
 
 /**
  * Nano Banana Pro (Gemini 3 Pro Image) を使ってまとめの内容から画像を生成する
- * references/style.png が存在する場合、スタイル参照として画像生成に使用する
+ * references/style.{png,jpg,jpeg,webp} が存在する場合、スタイル参照として画像生成に使用する
  * references/characters/ 内にキャラクター画像がある場合、まとめに登場するキャラクターの参照画像を渡す
  * @param {string} summary - 週間まとめテキスト
  * @returns {Promise<Buffer>} 生成された画像の Buffer
@@ -110,7 +112,7 @@ export async function generateImage(summary) {
     // リファレンス画像の読み込み
     const styleRef = loadStyleReference();
     if (!styleRef) {
-        console.log("  ℹ️ スタイル参照画像なし。references/style.png を配置すると画風を統一できます。");
+        console.log("  ℹ️ スタイル参照画像なし。references/style.png などを配置すると画風を統一できます。");
     }
 
     const characterRefs = loadCharacterReferences(summary);

@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { config } from "./config.js";
 import { withGeminiRetry } from "./retry.js";
 
-const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey, apiVersion: "v1beta" });
 
 /**
  * Gemini API を使って会話ログのまとめを生成する
