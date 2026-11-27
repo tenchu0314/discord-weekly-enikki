@@ -51,6 +51,28 @@ export function isNonRetryableError(error) {
 }
 
 /**
+ * ログ出力前に環境変数由来の機密情報（APIキー・Botトークン）をマスクする
+ * @param {unknown} input
+ * @returns {string}
+ */
+export function redactSecrets(input) {
+    let text = input instanceof Error
+        ? (input.stack || input.message || String(input))
+        : String(input ?? "");
+
+    const secrets = [
+        process.env.GEMINI_API_KEY,
+        process.env.DISCORD_BOT_TOKEN,
+    ].filter((v) => typeof v === "string" && v.length > 0);
+
+    for (const secret of secrets) {
+        text = text.replaceAll(secret, "[REDACTED]");
+    }
+
+    return text;
+}
+
+/**
  * Gemini API 呼び出しを最大3時間の指数バックオフでリトライする高階関数
  * @template T
  * @param {() => Promise<T>} operation - 実行する非同期処理
@@ -82,11 +104,12 @@ export async function withGeminiRetry(
             return await operation();
         } catch (error) {
             const elapsedMs = Date.now() - startTime;
+            const safeMessage = redactSecrets(error?.message || String(error));
 
             // 認証エラーなどの致命的エラーはリトライせずに即時 throw
             if (isNonRetryableError(error)) {
                 console.error(
-                    `\n🚫 [${operationName}] 復旧不可能なエラーを検出したため、リトライを中断します: ${error.message}`
+                    `\n🚫 [${operationName}] 復旧不可能なエラーを検出したため、リトライを中断します: ${safeMessage}`
                 );
                 throw error;
             }
@@ -110,7 +133,7 @@ export async function withGeminiRetry(
 
             const nextWaitSec = Math.max(1, Math.round(actualDelayMs / 1000));
             console.warn(
-                `\n⚠️ [${operationName}] エラーが発生しました: ${error.message}\n` +
+                `\n⚠️ [${operationName}] エラーが発生しました: ${safeMessage}\n` +
                 `⏳ 次回リトライまで ${nextWaitSec}秒 待機します (試行 ${attempt}回目 | 経過時間: ${formatDuration(elapsedMs)} / 上限: ${formatDuration(maxDurationMs)})`
             );
 
