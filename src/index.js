@@ -7,6 +7,7 @@ import {
 } from "./discord.js";
 import { generateSummary } from "./summarizer.js";
 import { generateImage } from "./imageGenerator.js";
+import { redactSecrets } from "./retry.js";
 
 /**
  * メイン処理
@@ -52,7 +53,7 @@ async function main() {
 
         console.log("\n🎉 全ての処理が完了しました！");
     } catch (error) {
-        console.error("\n❌ エラーが発生しました:", error);
+        console.error("\n❌ エラーが発生しました:", redactSecrets(error));
         process.exitCode = 1;
     } finally {
         // Discordクライアントを切断

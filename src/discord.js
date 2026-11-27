@@ -12,6 +12,8 @@ export async function createDiscordClient() {
             GatewayIntentBits.GuildMessages,
             GatewayIntentBits.MessageContent,
         ],
+        // LLM生成テキスト経由での @everyone / @here / ロールメンション誤爆・悪用を防止
+        allowedMentions: { parse: [] },
     });
 
     await client.login(config.discord.botToken);
@@ -257,33 +259,36 @@ export function formatMessagesForSummary(serverData) {
 export async function postSummary(client, summary, imageBuffer) {
     const channel = await client.channels.fetch(config.discord.targetChannelId);
 
-    if (!channel) {
+    if (!channel || !channel.isSendable()) {
         throw new Error(
-            `チャンネル ${config.discord.targetChannelId} が見つかりません。Bot がアクセスできるチャンネルIDを確認してください。`
+            `チャンネル ${config.discord.targetChannelId} が見つからないか、メッセージを送信できないチャンネルです。Bot がアクセスできるテキストチャンネルIDを確認してください。`
         );
     }
 
     // Discordのメッセージ文字数制限は2000文字
     const MAX_LENGTH = 2000;
     const header = "📰 **今週のサーバーまとめ**\n\n";
+    const allowedMentions = { parse: [] };
 
     // まとめが長い場合は分割して送信
     if ((header + summary).length <= MAX_LENGTH) {
         await channel.send({
             content: header + summary,
             files: [{ attachment: imageBuffer, name: "weekly-enikki.png" }],
+            allowedMentions,
         });
     } else {
         // まず画像付きヘッダーを送信
         await channel.send({
             content: header,
             files: [{ attachment: imageBuffer, name: "weekly-enikki.png" }],
+            allowedMentions,
         });
 
         // まとめテキストを分割して送信
         const chunks = splitText(summary, MAX_LENGTH);
         for (const chunk of chunks) {
-            await channel.send({ content: chunk });
+            await channel.send({ content: chunk, allowedMentions });
             await sleep(500);
         }
     }

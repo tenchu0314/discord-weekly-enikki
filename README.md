@@ -38,6 +38,7 @@ discord-weekly-enikki/
 │       └── リンカ.png
 ├── .env.example          # 環境変数テンプレート
 ├── .gitignore
+├── package-lock.json
 ├── package.json
 └── README.md
 ```
@@ -70,7 +71,6 @@ discord-weekly-enikki/
 2. Bot セクションで Bot を追加
 3. 以下の **Privileged Gateway Intents** を有効にする:
    - **Message Content Intent** ✅
-   - **Server Members Intent** ✅（任意）
 4. Bot Token をコピー
 5. OAuth2 > URL Generator で以下の権限でBotを招待:
    - Scopes: `bot`
@@ -84,6 +84,7 @@ discord-weekly-enikki/
 
 ```bash
 cp .env.example .env
+chmod 600 .env
 ```
 
 `.env` ファイルを編集:
@@ -94,7 +95,7 @@ DISCORD_TARGET_CHANNEL_ID=your_channel_id_here
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # 任意: 使用モデルの指定（.env.example で設定済み）
-GEMINI_TEXT_MODEL=gemini-2.5-flash
+GEMINI_TEXT_MODEL=gemini-3.6-flash
 GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview
 ```
 
@@ -160,11 +161,13 @@ crontab -e
 0 12 * * 0 cd /path/to/discord-weekly-enikki && /usr/bin/node src/index.js >> /var/log/discord-enikki.log 2>&1
 ```
 
-> **注意**: cron環境では `PATH` が通常と異なるため、Node.js のフルパス（`/usr/bin/node` など）を指定してください。`which node` で確認できます。
+> **注意**:
+> - cron環境では `PATH` が通常と異なるため、Node.js のフルパス（`/usr/bin/node` など）を指定してください。`which node` で確認できます。
+> - サーバーのタイムゾーンが UTC の場合は、`CRON_TZ=Asia/Tokyo` を設定するか UTC 基準（`0 3 * * 0`）で指定してください。
 
 ## 🔧 設定オプション
 
-| 環境変数 | 必須 | デフォルト | 説明 |
+| 環境変数 | 必須 | 未設定時のデフォルト | 説明 |
 | --- | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | ✅ | - | Discord Bot トークン |
 | `DISCORD_TARGET_CHANNEL_ID` | ✅ | - | まとめ投稿先チャンネルID |
@@ -172,7 +175,7 @@ crontab -e
 | `GEMINI_TEXT_MODEL` | ❌ | `gemini-2.5-flash` | テキスト要約・画像プロンプト生成モデル |
 | `GEMINI_IMAGE_MODEL` | ❌ | `gemini-2.5-flash` | 画像生成モデル |
 
-> **ヒント**: Nano Banana Pro を使用する場合は `.env` に `GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` を設定してください（`.env.example` では設定済みです）。
+> **ヒント**: `.env.example` では `GEMINI_TEXT_MODEL=gemini-3.6-flash`、`GEMINI_IMAGE_MODEL=gemini-3-pro-image-preview` が設定済みです。Nano Banana Pro で画像を生成する場合は `GEMINI_IMAGE_MODEL` を明示的に設定してください。
 
 ## ⚠️ 注意事項
 
@@ -180,5 +183,6 @@ crontab -e
 - Gemini APIのトークン制限により、非常に大量のメッセージがある場合は一部が切り捨てられる可能性があります
 - Nano Banana Pro のAPIはプレビュー版のため、モデル名が変更される可能性があります
 - Bot の **Message Content Intent** が有効でないとメッセージ内容を取得できません
+- 意図しない `@everyone` / `@here` / ロールメンションの通知を防ぐため、Botの投稿時はメンション展開を無効化しています
 - Gemini APIの呼び出し（まとめ生成・プロンプト考案・画像生成）に失敗した場合、指数バックオフによるリトライが最大3時間行われます（認証エラー等の復旧不可能なエラーを除く）
 - キャラクター参照画像のファイル名はDiscordの **表示名と完全一致** する必要があります

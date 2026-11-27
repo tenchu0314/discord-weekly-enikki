@@ -41,7 +41,7 @@ function getMimeType(ext) {
 export function loadStyleReference() {
     for (const ext of IMAGE_EXTENSIONS) {
         const candidatePath = path.join(REFERENCES_DIR, `style${ext}`);
-        if (fs.existsSync(candidatePath)) {
+        if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile()) {
             const imageBuffer = fs.readFileSync(candidatePath);
             const base64Data = imageBuffer.toString("base64");
 
@@ -64,19 +64,22 @@ function loadCharacterReferences(summary) {
         return [];
     }
 
-    const files = fs.readdirSync(CHARACTERS_DIR);
+    const files = fs.readdirSync(CHARACTERS_DIR).sort((a, b) => a.localeCompare(b));
     const matched = [];
 
     for (const file of files) {
-        const ext = path.extname(file).toLowerCase();
+        const rawExt = path.extname(file);
+        const ext = rawExt.toLowerCase();
         if (!IMAGE_EXTENSIONS.has(ext)) continue;
 
+        const filePath = path.join(CHARACTERS_DIR, file);
+        if (!fs.statSync(filePath).isFile()) continue;
+
         // ファイル名（拡張子なし）= キャラクター名
-        const characterName = path.basename(file, ext);
+        const characterName = path.basename(file, rawExt);
 
         // まとめテキストにキャラクター名が含まれているか
         if (summary.includes(characterName)) {
-            const filePath = path.join(CHARACTERS_DIR, file);
             const imageBuffer = fs.readFileSync(filePath);
             const base64Data = imageBuffer.toString("base64");
 
